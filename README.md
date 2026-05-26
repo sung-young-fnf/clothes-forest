@@ -21,6 +21,8 @@
 | 🔐 SSO 로그인 페이지 | Azure AD / NextAuth v5 코드 준비 (V1.5에서 어드민용 활성화) |
 | ⚙️ 모더레이션 | 닉네임 비속어 필터, 5분 자리비움 자동 퇴장, 민감 URL(결제/로그인) 차단 |
 
+<img width="1256" height="630" alt="스크린샷 2026-05-26 165908" src="https://github.com/user-attachments/assets/a5b66d3f-c02a-41bb-983c-b810bc741f75" />
+
 ---
 
 ## 기술 스택
