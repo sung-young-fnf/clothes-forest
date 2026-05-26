@@ -129,33 +129,6 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 
 ---
 
-## SSO 활성화 (V1.5 학습용)
-
-V1엔 익명 입장이 메인. SSO 진짜 동작시키려면:
-
-1. [Azure Portal](https://portal.azure.com) → Microsoft Entra ID → 앱 등록
-2. 리디렉션 URI: `http://localhost:3000/api/auth/callback/microsoft-entra-id`
-3. **클라이언트 ID / 테넌트 ID / 클라이언트 비밀** 발급 → `.env`에 입력
-4. `auth.ts`를 SSO 모드로 교체:
-   ```powershell
-   copy apps\closet-room\frontend\src\lib\auth-modes\auth-sso.ts apps\closet-room\frontend\src\lib\auth.ts
-   ```
-5. 재시작 → `/login`에서 Azure 버튼 동작
-
----
-
-## 다음 단계 (V1.5 / V2)
-
-- [ ] Azure Portal 앱 등록 → SSO 실동작
-- [ ] `/admin/*` 어드민 페이지에 SSO 보호 적용 (middleware.ts)
-- [ ] Chrome Extension 자동 동기화 (manifest key 고정 + externally_connectable)
-- [ ] 동물별 디테일 (꼬리, 4방향 facing/walk 애니메이션)
-- [ ] **V2** — 옷장 등록 + 자동 태깅 + 코디 조언 + Google 로그인 + Postgres 전환
-
-자세한 진행 상황은 [`TASKS.md`](./TASKS.md), 기획은 [`clothesPlan.md`](../clothesPlan.md) 참고.
-
----
-
 ## 라이선스 / 출처
 
 - 기반: **fnf-mono-starter** (F&F 내부 모노레포 템플릿)
