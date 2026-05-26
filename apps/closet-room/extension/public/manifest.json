@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Closet Room — 쇼핑 동행",
+  "version": "0.1.0",
+  "description": "Closet Room 방으로 현재 보는 쇼핑몰 페이지를 공유합니다.",
+  "icons": {},
+  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": [
+    "https://*.musinsa.com/*",
+    "https://*.29cm.co.kr/*",
+    "https://*.coupang.com/*",
+    "https://*.zigzag.kr/*",
+    "http://localhost:3000/*",
+    "http://localhost:8000/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Closet Room"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.musinsa.com/*",
+        "https://*.29cm.co.kr/*",
+        "https://*.coupang.com/*",
+        "https://*.zigzag.kr/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": ["http://localhost:3000/*"]
+  }
+}

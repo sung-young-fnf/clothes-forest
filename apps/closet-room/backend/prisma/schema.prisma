@@ -1,0 +1,166 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Built-in: User (V1.5 어드민용 보존) ────────────────
+
+model User {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  name          String?
+  entraObjectId String?   @unique @map("entra_object_id")
+  department    String?
+  status        String    @default("active") // active | inactive
+  isAdmin       Boolean   @default(false) @map("is_admin")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  lastLoginAt   DateTime? @map("last_login_at")
+
+  roles     UserRole[]
+  auditLogs AuditLog[]
+
+  @@map("users")
+}
+
+// ─── Built-in: Role (RBAC) ─────────────────────────────
+
+model Role {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users UserRole[]
+  menus MenuPermission[]
+
+  @@map("roles")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+// ─── Built-in: Menu (동적 사이드바) ────────────────────
+
+model Menu {
+  id           String   @id @default(uuid())
+  menuKey      String   @unique @map("menu_key")
+  label        String
+  icon         String?
+  route        String?
+  parentId     String?  @map("parent_id")
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  parent      Menu?            @relation("MenuHierarchy", fields: [parentId], references: [id])
+  children    Menu[]           @relation("MenuHierarchy")
+  permissions MenuPermission[]
+
+  @@map("menus")
+}
+
+model MenuPermission {
+  id      String  @id @default(uuid())
+  menuId  String  @map("menu_id")
+  roleId  String  @map("role_id")
+  canView Boolean @default(true) @map("can_view")
+
+  menu Menu @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([menuId, roleId])
+  @@map("menu_permissions")
+}
+
+// ─── Built-in: Audit Log ───────────────────────────────
+
+model AuditLog {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  action    String
+  resource  String?
+  detail    String?  // SQLite: JSON string (V2 Postgres 전환 시 Json?)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ─── 앱별 모델: V1 Closet Room ─────────────────────────
+
+// 익명 세션 — 닉네임 + 동물 캐릭터로 입장
+model Session {
+  deviceId    String   @id @map("device_id")
+  nickname    String
+  characterId String   @map("character_id") // dog | cat | rabbit | fox | bear | hamster
+  joinedAt    DateTime @default(now()) @map("joined_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  @@index([nickname])
+  @@map("sessions")
+}
+
+// Chrome Extension 검색 동행 세션
+model BrowseSession {
+  id            String   @id @default(uuid())
+  hostSessionId String   @map("host_session_id")
+  hostNickname  String?  @map("host_nickname")
+  startedAt     DateTime @default(now()) @map("started_at")
+  endedAt       DateTime? @map("ended_at")
+  lastUrl       String?  @map("last_url")
+  lastPageMeta  String?  @map("last_page_meta") // JSON string
+
+  events        PageEvent[]
+
+  @@index([hostSessionId])
+  @@index([startedAt])
+  @@map("browse_sessions")
+}
+
+model PageEvent {
+  id              String        @id @default(uuid())
+  browseSessionId String        @map("browse_session_id")
+  url             String
+  title           String?
+  ogImageUrl      String?       @map("og_image_url")
+  ogDescription   String?       @map("og_description")
+  siteName        String?       @map("site_name")
+  priceText       String?       @map("price_text")
+  capturedAt      DateTime      @default(now()) @map("captured_at")
+
+  session BrowseSession @relation(fields: [browseSessionId], references: [id], onDelete: Cascade)
+
+  @@index([browseSessionId, capturedAt])
+  @@map("page_events")
+}
+
+// 공용 채팅 메시지 (방 단위 broadcast)
+model ChatMessage {
+  id              String   @id @default(uuid())
+  roomId          String   @map("room_id")
+  senderType      String   @map("sender_type")        // user | claude | system
+  senderSessionId String?  @map("sender_session_id")  // user일 때 deviceId, claude/system이면 null
+  senderNickname  String?  @map("sender_nickname")    // 비정규화 (Session row 삭제돼도 표시)
+  content         String
+  kind            String   @default("text")          // text | page_card | system
+  metadata        String?                             // SQLite: JSON string
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([roomId, createdAt])
+  @@map("chat_messages")
+}

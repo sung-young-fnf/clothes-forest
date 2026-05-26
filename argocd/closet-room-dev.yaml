@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: closet-room-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: closet-room
+  source:
+    repoURL: https://github.com/fnf-process/clothes-forest.git
+    targetRevision: develop
+    path: charts/closet-room
+    helm:
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: closet-room-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

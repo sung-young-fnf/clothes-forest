@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+  namespace: {{ "{{ .Values.global.namespace }}" }}
+  labels:
+    {{- "{{ include \"app.labels\" . | nindent 4 }}" }}
+    app.kubernetes.io/component: backend
+spec:
+  {{- "{{ if not .Values.backend.autoscaling.enabled }}" }}
+  replicas: {{ "{{ .Values.backend.replicaCount }}" }}
+  {{- "{{ end }}" }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+        app.kubernetes.io/component: backend
+        {{- "{{ if .Values.backend.apm.enabled }}" }}
+        # Datadog APM auto-instrumentation (admission controller label-based)
+        admission.datadoghq.com/enabled: "true"
+        tags.datadoghq.com/service: "{{ "{{ include \"app.fullname\" . }}" }}-backend"
+        tags.datadoghq.com/env: {{ "{{ .Values.global.environment | quote }}" }}
+        tags.datadoghq.com/version: {{ "{{ .Values.backend.image.tag | default .Chart.AppVersion | quote }}" }}
+        {{- "{{ end }}" }}
+      {{- "{{ if .Values.backend.apm.enabled }}" }}
+      annotations:
+        # ddtrace lib version — 인프라 전반 일괄 관리. Dockerfile/requirements 에 ddtrace 추가 금지.
+        admission.datadoghq.com/{{ "{{ .Values.backend.apm.language }}" }}-lib.version: {{ "{{ .Values.backend.apm.libVersion | quote }}" }}
+      {{- "{{ end }}" }}
+    spec:
+      # AZ + 노드 분산 — 한 노드/AZ 다운 시 single point of failure 방지
+      # whenUnsatisfiable: ScheduleAnyway — 노드 수 부족 시 schedule 막지 않음 (strict 아님)
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+              app.kubernetes.io/component: backend
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+              app.kubernetes.io/component: backend
+      {{- "{{ if .Values.backend.migration.enabled }}" }}
+      initContainers:
+        - name: db-migrate
+          image: "{{ "{{ .Values.backend.image.repository }}" }}:{{ "{{ .Values.backend.image.tag }}" }}"
+          command: {{- "{{ toYaml .Values.backend.migration.command | nindent 12 }}" }}
+          envFrom:
+            - secretRef:
+                name: {{ "{{ include \"app.fullname\" . }}" }}-backend-env
+      {{- "{{ end }}" }}
+      containers:
+        - name: backend
+          image: "{{ "{{ .Values.backend.image.repository }}" }}:{{ "{{ .Values.backend.image.tag }}" }}"
+          imagePullPolicy: {{ "{{ .Values.backend.image.pullPolicy }}" }}
+          ports:
+            - containerPort: {{ "{{ .Values.backend.port }}" }}
+          envFrom:
+            - secretRef:
+                name: {{ "{{ include \"app.fullname\" . }}" }}-backend-env
+          {{- "{{ with .Values.backend.startupProbe }}" }}
+          startupProbe:
+            {{- "{{ toYaml . | nindent 12 }}" }}
+          {{- "{{ end }}" }}
+          {{- "{{ with .Values.backend.livenessProbe }}" }}
+          livenessProbe:
+            {{- "{{ toYaml . | nindent 12 }}" }}
+          {{- "{{ end }}" }}
+          {{- "{{ with .Values.backend.readinessProbe }}" }}
+          readinessProbe:
+            {{- "{{ toYaml . | nindent 12 }}" }}
+          {{- "{{ end }}" }}
+          resources:
+            {{- "{{ toYaml .Values.backend.resources | nindent 12 }}" }}

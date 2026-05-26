@@ -1,0 +1,83 @@
+# Closet Room — V1 로컬 Docker 구성
+# 한 번에 기동: docker compose up --build
+#
+# 구성:
+#   - frontend (Next.js standalone)  → http://localhost:3000
+#   - backend  (NestJS + Prisma)     → http://localhost:8000
+#   - valkey   (Redis 호환, OSS)     → socket.io adapter / rate-limit 저장
+#
+# DB는 SQLite 파일 (V1). backend 컨테이너의 /app/data/dev.db에 영속.
+# Postgres 전환(V2)은 docker-compose.dev.yml로 따로 띄움.
+
+services:
+  valkey:
+    image: valkey/valkey:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - valkey_data:/data
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/closet-room/backend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      valkey:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    environment:
+      # schema.prisma 기준 상대경로 → /app/prisma/../data/dev.db = /app/data/dev.db
+      DATABASE_URL: "file:../data/dev.db"
+      JWT_SECRET: "${JWT_SECRET:-dev-secret-change-me-in-production}"
+      CORS_ORIGINS: "http://localhost:3000"
+      REDIS_URL: "redis://valkey:6379"
+      AWS_REGION: "${AWS_REGION:-us-west-2}"
+      AWS_BEARER_TOKEN_BEDROCK: "${AWS_BEARER_TOKEN_BEDROCK:-}"
+      SONNET_MODEL_ID: "${SONNET_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}"
+    volumes:
+      # SQLite 파일을 호스트와 공유 (컨테이너 재기동에도 데이터 보존)
+      - ./apps/closet-room/backend/data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/closet-room/frontend/Dockerfile
+      args:
+        # 브라우저 socket.io 연결 endpoint (호스트 기준)
+        NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:3000"
+    environment:
+      # 브라우저는 직접 호출 불가(BFF). 서버사이드에서만 사용.
+      BACKEND_URL: "http://backend:8000"
+      # 브라우저 socket.io 연결은 호스트 기준 (컨테이너 네트워크 X)
+      NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
+      AUTH_SECRET: "${AUTH_SECRET:-dev-secret-change-me}"
+      NEXTAUTH_URL: "http://localhost:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  valkey_data:

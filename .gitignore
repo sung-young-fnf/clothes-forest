@@ -21,6 +21,11 @@ __pycache__/
 .env.local
 .env.*.local
 
+# SQLite (V1)
+*.db
+*.db-journal
+data/
+
 # IDE
 .idea/
 .vscode/

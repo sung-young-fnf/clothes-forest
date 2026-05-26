@@ -1,0 +1,40 @@
+{
+  "name": "@clothes-forest/closet-room-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "fetch:openapi": "cp ../backend/openapi.json ./openapi.json",
+    "generate:types": "openapi-typescript ./openapi.json -o ./src/types/generated/api.ts",
+    "generate:api": "pnpm fetch:openapi && pnpm generate:types"
+  },
+  "dependencies": {
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.468.0",
+    "next": "^16.0.0",
+    "next-auth": "^5.0.0-beta.25",
+    "phaser": "^4.1.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "socket.io-client": "^4.8.3",
+    "tailwind-merge": "^2.6.0",
+    "tailwindcss-animate": "^1.0.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^16.0.0",
+    "openapi-typescript": "^7.6.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Closet Room</title>
+    <style>
+      body {
+        width: 280px;
+        margin: 0;
+        padding: 16px;
+        font-family: -apple-system, system-ui, 'Pretendard', sans-serif;
+        color: #1f1208;
+        background: #faf6f0;
+      }
+      h1 {
+        font-size: 14px;
+        margin: 0 0 12px;
+      }
+      .row {
+        margin-bottom: 8px;
+      }
+      input[type='text'] {
+        width: 100%;
+        padding: 6px 8px;
+        font-size: 12px;
+        border: 1px solid #c8b294;
+        border-radius: 4px;
+        box-sizing: border-box;
+      }
+      button {
+        width: 100%;
+        padding: 8px;
+        background: #a76a3a;
+        color: white;
+        border: none;
+        border-radius: 4px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled {
+        background: #c8b294;
+        cursor: not-allowed;
+      }
+      .status {
+        margin-top: 12px;
+        padding: 8px;
+        border-radius: 4px;
+        font-size: 12px;
+      }
+      .status.ok {
+        background: #d8e8d4;
+        color: #2c4a23;
+      }
+      .status.err {
+        background: #f6d8d4;
+        color: #6e2820;
+      }
+      .hint {
+        font-size: 11px;
+        color: #6b5840;
+        margin-top: 8px;
+        line-height: 1.4;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>🏠 Closet Room 페어링</h1>
+    <div id="paired-state" style="display:none">
+      <div class="status ok">
+        <strong id="paired-nickname"></strong>로 페어링됨
+      </div>
+      <div class="hint" id="session-hint">방에서 "검색 시작"을 누르면 자동으로 활성화돼요.</div>
+      <button id="unpair" style="margin-top:8px;background:#7a4a26">페어 해제</button>
+    </div>
+    <div id="unpaired-state">
+      <div class="row">
+        <input id="nonce" type="text" placeholder="방에서 받은 페어링 코드" autocomplete="off" />
+      </div>
+      <div class="row">
+        <button id="exchange">페어링</button>
+      </div>
+      <div class="hint">
+        Closet Room 방에서 "검색 시작" 버튼을 누르면 페어링 코드가 나타나요.<br />
+        코드를 여기 붙여넣고 "페어링"을 누르세요.
+      </div>
+    </div>
+    <div id="status" class="status" style="display:none"></div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

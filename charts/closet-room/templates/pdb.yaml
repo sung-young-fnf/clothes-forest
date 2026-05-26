@@ -1,0 +1,42 @@
+{{ "{{- /*" }}
+PodDisruptionBudget — 노드 정비 (kubectl drain) 또는 Karpenter
+consolidation 시 양쪽 Pod 동시 evict 방지. 항상 최소 1개 살아있음 보장.
+
+HPA min=2 와 정합: minAvailable=1 이면 항상 1개 가용.
+backend/frontend 각각 별도 PDB.
+
+비활성화: .Values.{backend,frontend}.podDisruptionBudget.enabled = false
+{{ "*/ -}}" }}
+{{ "{{- if and .Values.backend.enabled (default true .Values.backend.podDisruptionBudget.enabled) }}" }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+  namespace: {{ "{{ .Values.global.namespace }}" }}
+  labels:
+    {{- "{{ include \"app.labels\" . | nindent 4 }}" }}
+    app.kubernetes.io/component: backend
+spec:
+  minAvailable: {{ "{{ default 1 .Values.backend.podDisruptionBudget.minAvailable }}" }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-backend
+      app.kubernetes.io/component: backend
+{{ "{{- end }}" }}
+---
+{{ "{{- if and .Values.frontend.enabled (default true .Values.frontend.podDisruptionBudget.enabled) }}" }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ "{{ include \"app.fullname\" . }}" }}-frontend
+  namespace: {{ "{{ .Values.global.namespace }}" }}
+  labels:
+    {{- "{{ include \"app.labels\" . | nindent 4 }}" }}
+    app.kubernetes.io/component: frontend
+spec:
+  minAvailable: {{ "{{ default 1 .Values.frontend.podDisruptionBudget.minAvailable }}" }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ "{{ include \"app.fullname\" . }}" }}-frontend
+      app.kubernetes.io/component: frontend
+{{ "{{- end }}" }}

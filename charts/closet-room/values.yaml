@@ -1,0 +1,117 @@
+global:
+  namespace: closet_room
+  environment: dev
+
+backend:
+  replicaCount: 1
+  image:
+    repository: ""
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 8000
+  # Datadog APM auto-instrumentation (admission controller label-based)
+  # cluster 측 admissionController.enabled=true 가 전제. ddtrace 라이브러리는 Dockerfile 에 추가하지 않고 annotation 으로만 관리.
+  # language: js (FastAPI) / js (NestJS) / java / dotnet / ruby
+  # ⚠️ python v3.0.0 은 typing_extensions 이슈로 pydantic 최신과 충돌. v3.19.7+ 사용 필수.
+  apm:
+    enabled: true
+    language: js
+    libVersion: "v5.0.0"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  # HPA (Horizontal Pod Autoscaler)
+  # enabled=true 시 replicaCount 대신 minReplicas~maxReplicas 범위에서 CPU 기준 자동 스케일
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  env: []
+  # DB migration (initContainer)
+  migration:
+    enabled: true
+    command: []  # FastAPI: ["uv", "run", "alembic", "upgrade", "head"] / NestJS: ["npx", "prisma", "migrate", "deploy"]
+  # startupProbe: bootstrap 전용 (DB migration, permission sync 등 초기화 긴 작업 허용)
+  # 성공 전까지 liveness/readiness 동작 안 함 → kill loop 방지
+  # period 10s x failureThreshold 30 = 최대 300초 허용
+  startupProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 30
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /health
+      port: 8000
+    initialDelaySeconds: 5
+    periodSeconds: 10
+
+frontend:
+  replicaCount: 1
+  image:
+    repository: ""
+    tag: latest
+    pullPolicy: IfNotPresent
+  port: 3000
+  # Datadog APM auto-instrumentation (Next.js = js-lib)
+  apm:
+    enabled: true
+    language: js
+    libVersion: "v5.0.0"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+  # HPA (Horizontal Pod Autoscaler)
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+  env:
+    - name: BACKEND_URL
+      value: "http://closet-room-backend:8000"
+  # startupProbe: bootstrap 전용 (Next.js cold start / SSG warm-up 허용)
+  startupProbe:
+    httpGet:
+      path: /api/health
+      port: 3000
+    periodSeconds: 10
+    timeoutSeconds: 3
+    failureThreshold: 30
+  livenessProbe:
+    httpGet:
+      path: /api/health
+      port: 3000
+    initialDelaySeconds: 30
+    periodSeconds: 30
+  readinessProbe:
+    httpGet:
+      path: /api/health
+      port: 3000
+    initialDelaySeconds: 10
+    periodSeconds: 10
+
+ingress:
+  enabled: true
+  className: nginx
+  host: closet-room.fnf.co.kr
+  tls:
+    enabled: true
+    secretName: closet-room-tls
