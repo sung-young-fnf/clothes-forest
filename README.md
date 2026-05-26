@@ -1,259 +1,161 @@
-# fnf-mono-starter
+# Closet Room
 
-> F&F 내부 서비스 모노레포 템플릿 — K8s 기반, FastAPI/NestJS + Next.js 16
+> 픽셀 방에 모인 사람들과 **같이 쇼핑하는 공간**.
+> 익명 닉네임 + 동물 캐릭터로 입장해 채팅하고, 누군가 "검색"을 누르면
+> Chrome Extension이 그 화면을 방으로 broadcast해서 **Claude가 모두에게 조언**해줍니다.
 
-## Quick Start
+> 🧪 Docker 기초 실습 과제 개인 프로젝트 — fnf-mono-starter 베이스.
 
-```bash
-# 1. 템플릿 클론
-git clone https://github.com/fnf-process/fnf-mono-starter.git prcs-devtools
-cd prcs-devtools
+---
 
-# 2. 프로젝트 초기화
-./scripts/init-project.sh prcs-devtools "PRCS Internal Dev Tools"
+## 핵심 기능 (V1)
 
-# 3. 앱 생성 (CLI 또는 인터랙티브)
-./scripts/create-app.sh s3gate fastapi --port 3100 --sso --design
-# 또는 인터랙티브:
-./scripts/create-app.sh
-
-# 4. DB 초기화
-docker compose -f docker-compose.dev.yml up -d
-psql -U postgres -f apps/s3gate/backend/scripts/init-db.sql
-
-# 5. 개발 시작
-cd apps/s3gate/backend && uv sync  # FastAPI
-cd apps/s3gate/frontend && pnpm install
-pnpm dev  # (루트에서)
-```
-
-## 구조
-
-```
-fnf-mono-starter/
-├── apps/                          # 앱들 (create-app.sh로 생성)
-│   └── {app-name}/
-│       ├── backend/               # FastAPI 또는 NestJS
-│       │   ├── src/               # 소스 코드 (빌트인 RBAC 포함)
-│       │   ├── scripts/init-db.sql # DBUSER 정책 DB 초기화
-│       │   ├── Dockerfile         # Multi-stage production build
-│       │   └── .env.example
-│       ├── frontend/              # Next.js 16 (shadcn/ui)
-│       │   ├── src/app/           # App Router + BFF proxy
-│       │   ├── src/widgets/sidebar/ # 동적 사이드바
-│       │   ├── src/lib/auth.ts    # 인증 (SSO 또는 No-Auth)
-│       │   ├── Dockerfile
-│       │   └── .env.example
-│       ├── DESIGN.md              # AI 디자인 시스템 (선택)
-│       └── CLAUDE.md              # 앱별 에이전트 가이드
-├── charts/{app-name}/             # Helm chart (Deploy/Service/Ingress/HPA)
-├── argocd/                        # ArgoCD Application CR (하이브리드 GitOps)
-│   ├── {app-name}-dev.yaml        # develop 브랜치, prune=true
-│   └── {app-name}-prd.yaml        # main 브랜치, prune=false (수동 승인)
-├── templates/                     # 앱 템플릿 원본
-│   ├── fastapi/                   # Python backend
-│   ├── nestjs/                    # TypeScript backend
-│   └── nextjs/                    # Next.js frontend
-├── .claude/                       # AI 에이전트 시스템 (44 agents + squads)
-├── .mcp.json                      # DB MCP 서버 (앱별 자동 추가)
-├── docker-compose.dev.yml         # 로컬 PostgreSQL (pgvector)
-└── docs/DBUSER-POLICY.md
-```
-
-## 인증 모드
-
-`create-app.sh`에서 선택:
-
-| 모드 | 옵션 | 로그인 | 사이드바 | 용도 |
-|------|------|--------|---------|------|
-| **No-Auth** | (기본) | 없음 — 바로 진입 | 전체 메뉴 표시 | 초기 개발, 프로토타입 |
-| **SSO** | `--sso` | MS Entra ID | 역할 기반 필터링 | 사내 운영 서비스 |
-
-### No-Auth → SSO 전환 (나중에 켤 때)
-
-```bash
-# 1. auth.ts 교체
-cp src/lib/auth-modes/auth-sso.ts src/lib/auth.ts
-
-# 2. .env 설정
-AZURE_AD_CLIENT_ID=your-client-id
-AZURE_AD_CLIENT_SECRET=your-client-secret
-AZURE_AD_TENANT_ID=your-tenant-id
-AUTH_SECRET=$(openssl rand -base64 32)
-
-# 3. middleware.ts 복원 (라우트 보호)
-# create-app.sh --sso로 생성한 앱에서 복사하거나 직접 생성:
-echo 'export { auth as middleware } from "@/lib/auth";
-export const config = { matcher: ["/((?!api|_next|favicon.ico|login|auth).*)"] };' > src/middleware.ts
-```
-
-### SSO 상세 (MS Entra ID)
-
-```
-Browser → /login → signIn('microsoft-entra-id')
-  → MS Entra ID 인증 (MFA/조건부 액세스는 Entra 정책이 처리)
-  → /api/auth/callback → NextAuth JWT 세션 생성
-  → /api/v1/* → Bearer token → Backend
-```
-
-- **무료**: MS 365 포함 Entra ID Free로 충분
-- **외부 사용자**: Entra Guest (B2B) 초대 또는 향후 Authentik 추가
-- **토큰 갱신**: auth.ts에서 자동 refresh (만료 1분 전)
-
-## 백엔드 선택
-
-| | FastAPI | NestJS |
-|--|---------|--------|
-| **언어** | Python 3.11+ | TypeScript |
-| **ORM** | SQLAlchemy + Alembic | Prisma (custom output + sync-client) |
-| **DI 패턴** | `Depends(get_current_user)` | `@CurrentUser()` + Guard |
-| **RBAC** | `require_admin`, `require_role()` | `AdminGuard`, `RolesGuard`, `@Roles()` |
-| **패키지** | uv | pnpm |
-| **적합** | ML/Data, AWS SDK 집약 | REST API, 타입 안전성 |
-
-## 빌트인 기능 (모든 앱에 포함)
-
-### RBAC (User + Role + Menu)
-
-| 모듈 | API | 설명 |
-|------|-----|------|
-| **User** | `GET /users/me`, `GET /users` | SSO 자동등록, 관리자 목록 |
-| **Role** | `CRUD /roles` | 역할 생성/수정/삭제 (AdminGuard) |
-| **Menu** | `GET /menus/tree`, `CRUD /menus` | 역할 기반 동적 메뉴 |
-| **Auth** | 글로벌 Guard | JWT 인증 + Admin/Roles 가드 |
-
-### 프론트엔드 UI
-
-| 페이지 | 경로 | 설명 |
-|--------|------|------|
-| 로그인 | `/login` | MS SSO 버튼 (No-Auth: 자동 redirect) |
-| 동적 사이드바 | 전체 | 역할 기반 메뉴 + Lucide 아이콘 + 활성 표시 |
-| 사용자 관리 | `/admin/users` | 통계 카드 + 테이블 + Admin 토글 |
-| 메뉴 관리 | `/admin/menus` | 트리 테이블 + CRUD 폼 + 권한 배지 |
-
-## DB 정책 (DBUSER)
-
-모든 앱은 F&F DBUSER 정책을 따릅니다:
-- **public 스키마 금지** → 서비스 전용 스키마 (`{app_name}`)
-- **Owner 3단 분리**: `_adm` / `_object_owner_role` / `_dml_role`
-- **앱 런타임**: `_svc` 계정 (DML 전용)
-- **마이그레이션**: `_ops` 계정 (DDL, SET ROLE object_owner_role)
-
-상세: [docs/DBUSER-POLICY.md](docs/DBUSER-POLICY.md)
-
-## create-app.sh 옵션
-
-```bash
-# CLI 모드
-./scripts/create-app.sh <name> <fastapi|nestjs> [options]
-
-# 옵션
---port <N>     프론트엔드 포트 (기본: 3100, 사용 중이면 자동 추천)
---sso          MS Entra ID SSO 인증 포함
---design       DESIGN.md (AI 디자인 시스템) 포함
-
-# 인터랙티브 모드 (옵션 없이 실행)
-./scripts/create-app.sh
-```
-
-### 생성되는 것
-
-| 항목 | 설명 |
-|------|------|
-| `apps/{name}/backend/` | FastAPI 또는 NestJS (빌트인 RBAC + Example 모듈) |
-| `apps/{name}/frontend/` | Next.js 16 (shadcn/ui + BFF proxy + 사이드바 + Admin) |
-| `apps/{name}/CLAUDE.md` | 앱별 에이전트 가이드 (자동 생성) |
-| `apps/{name}/DESIGN.md` | AI 디자인 시스템 (--design 선택 시) |
-| `charts/{name}/` | Helm chart (Deployment + Service + Ingress + HPA) |
-| `.github/workflows/{name}-backend-dev.yml` | Backend 배포 (ECR push + Buildx) |
-| `.github/workflows/{name}-frontend-dev.yml` | Frontend 배포 (ECR push + Buildx) |
-| `.mcp.json` | PostgreSQL MCP 서버 (앱별 누적 추가) |
-
-## 배포 전략
-
-### Dev 환경 (자동)
-
-```
-코드 변경 → PR 머지 → GitHub Actions 자동 빌드 → ECR 푸시 → ArgoCD 감지 → EKS 배포
-```
-
-- Backend 변경 시 `{app}-backend-dev.yml`만 실행 (Frontend 무영향)
-- Frontend 변경 시 `{app}-frontend-dev.yml`만 실행 (Backend 무영향)
-- 이미지 태그: `{short-sha}-{timestamp}` + `dev-latest`
-
-### Prd 환경 (태그 프로모션)
-
-```
-Dev 검증 완료 → Helm values에 이미지 태그 변경 → ArgoCD Sync → Prd 배포
-```
-
-- **별도 CI/CD 워크플로우 없음** — Dev 이미지를 그대로 사용
-- Helm `values-prd.yaml`에서 이미지 태그만 변경 (dev-latest → 특정 버전)
-- ArgoCD가 Git 변경 감지 → 자동 또는 수동 Sync
-
-### 필요한 GitHub 설정
-
-| Variable (environment: dev) | 설명 |
+| 영역 | 내용 |
 |---|---|
-| `ECR_URL_BACKEND` | Backend ECR 레포 URL |
-| `ECR_URL_FRONTEND` | Frontend ECR 레포 URL |
-| `ROLE_ARN` | AWS OIDC 인증 Role ARN |
-| `AWS_REGION` | `ap-northeast-2` |
+| 🚪 입장 | 닉네임 + 동물 6종 카드 → 익명 JWT (httpOnly 쿠키) |
+| 🏠 픽셀 방 | Phaser.js + 마인크래프트 오크 plank 룩 (바닥/벽/가구/동물 전신 스프라이트) |
+| 👥 멀티플레이 | Socket.io Gateway, 위치·채팅 실시간 동기화 |
+| 💬 공용 채팅 | rate limit (초당 1·분당 30) + 머리 위 말풍선 3초 페이드 |
+| 🤖 Claude `@claude` 멘션 | AWS Bedrock Sonnet 4.5, persona 가드레일 |
+| 🛒 Chrome Extension | 무신사·29CM·쿠팡·지그재그 페이지를 방으로 자동 공유 (페이지 카드 UI) |
+| 🔐 SSO 로그인 페이지 | Azure AD / NextAuth v5 코드 준비 (V1.5에서 어드민용 활성화) |
+| ⚙️ 모더레이션 | 닉네임 비속어 필터, 5분 자리비움 자동 퇴장, 민감 URL(결제/로그인) 차단 |
 
-## AI 에이전트 시스템
+---
 
-```
-.claude/
-├── agents/          # 44개 에이전트 (epic→story→task→code-writer→validator)
-├── skills/          # 스킬/커맨드 시스템
-├── squads/          # 스쿼드 편성 (EPIC/STORY/BUG 등 규모별 자동 편성)
-├── hooks/           # Hook 자동 트리거 (빌드/커밋/에러 감지)
-├── rules/           # 품질/워크플로우 규칙
-└── guides/          # 기술 가이드 문서
-```
+## 기술 스택
 
-## AI로 프로젝트 시작하기 (Prompts)
+| Layer | Tech |
+|---|---|
+| Frontend | Next.js 16 (App Router) + React 19 + TypeScript + Tailwind + **Phaser.js** |
+| Backend | NestJS 10 + Prisma + **Socket.io** + Valkey adapter |
+| DB | **SQLite** (V1, 파일 1개) / Postgres + pgvector (V2 예정) |
+| Auth | 자체 익명 JWT (메인) + NextAuth v5 Azure AD (`/login`, V1.5 활성화) |
+| AI | Anthropic SDK + **AWS Bedrock** (Sonnet 4.5) |
+| Extension | Manifest V3 + TypeScript + Vite |
+| Infra | Docker Compose (V1) / K8s + Helm + ArgoCD (V2, mono-starter 준비됨) |
 
-### 1. 프로젝트 초기화
+---
 
-```
-fnf-mono-starter로 새 프로젝트를 만들어줘.
-- 프로젝트명: prcs-devtools
-- 설명: PRCS 내부 개발 도구
-./scripts/init-project.sh prcs-devtools "PRCS Internal Dev Tools"
-```
+## Quick Start — Docker Compose (권장)
 
-### 2. 앱 추가
+```powershell
+# 1) 환경변수 채우기 (한 번)
+cp .env.docker.example .env
+# .env 열어서 JWT_SECRET / AUTH_SECRET / AWS_BEARER_TOKEN_BEDROCK 등 입력
 
-```
-새 앱을 추가해줘.
-- 앱 이름: s3gate
-- 백엔드: FastAPI
-- 인증: MS SSO
-- DESIGN.md 포함
-./scripts/create-app.sh s3gate fastapi --port 3100 --sso --design
-```
+# 2) 전체 기동
+docker compose up --build
 
-### 3. 기능 구현 (Epic)
-
-```
-s3gate PRD 기반 Phase 1 구현해줘.
-- PRD: apps/s3gate/CLAUDE.md 참고
-- Epic 생성 → Story 분해 → 순차 구현
+# 3) 종료
+docker compose down            # 컨테이너만 제거 (DB 유지)
+docker compose down -v         # 볼륨까지 제거 (Valkey 초기화)
 ```
 
-### 4. 인증 모드 전환
+접속:
+- 메인 (익명 입장): http://localhost:3000
+- SSO 페이지: http://localhost:3000/login
+- 백엔드 헬스: http://localhost:8000/api/health
+- Swagger: http://localhost:8000/api/docs
+
+---
+
+## Quick Start — Local Dev (Hot Reload)
+
+서로 다른 터미널 2개:
+
+```powershell
+# Backend (port 8000)
+cd apps/closet-room/backend
+pnpm dev
+
+# Frontend (port 3000)
+cd apps/closet-room/frontend
+pnpm dev
+```
+
+Chrome Extension (선택):
+
+```powershell
+cd apps/closet-room/extension
+pnpm build
+# → chrome://extensions → 개발자 모드 → 압축해제된 확장 프로그램 로드 → dist/ 선택
+```
+
+---
+
+## 프로젝트 구조
 
 ```
-s3gate를 No-Auth에서 SSO 모드로 전환해줘.
-- auth-modes/auth-sso.ts → auth.ts 복사
-- .env에 Azure AD 설정 추가
-- middleware.ts 생성
+clothes-forest/
+├── apps/closet-room/
+│   ├── backend/             # NestJS + Prisma(SQLite) + Socket.io
+│   ├── frontend/            # Next.js 16 + Phaser.js + ChatPanel
+│   └── extension/           # Chrome Extension (Manifest V3, Vite)
+├── docker-compose.yml       # V1 — FE + BE + Valkey
+├── charts/closet-room/      # Helm chart (V2 K8s 배포용, 미사용)
+├── argocd/                  # ArgoCD App CR (V2 GitOps, 미사용)
+├── clothesPlan.md           # 기획서 (V1/V2 로드맵)
+└── TASKS.md                 # 진행 체크리스트
 ```
 
-### 5. 버그 수정
+---
 
+## 환경변수 (.env)
+
+```env
+# 서버 시크릿 (랜덤 32바이트)
+JWT_SECRET=...
+AUTH_SECRET=...
+NEXTAUTH_URL=http://localhost:3000
+
+# Azure AD SSO (V1.5 — 지금은 placeholder)
+AZURE_AD_CLIENT_ID=...
+AZURE_AD_CLIENT_SECRET=...
+AZURE_AD_TENANT_ID=...
+
+# Claude via AWS Bedrock (비우면 @claude 멘션은 안내 메시지로 fallback)
+AWS_REGION=us-west-2
+AWS_BEARER_TOKEN_BEDROCK=
+SONNET_MODEL_ID=us.anthropic.claude-sonnet-4-5-20250929-v1:0
 ```
-{앱}에서 {증상} 버그 발생.
-- /diagnose 모드로 진단 먼저
+
+랜덤 시크릿 생성:
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
 ```
+
+---
+
+## SSO 활성화 (V1.5 학습용)
+
+V1엔 익명 입장이 메인. SSO 진짜 동작시키려면:
+
+1. [Azure Portal](https://portal.azure.com) → Microsoft Entra ID → 앱 등록
+2. 리디렉션 URI: `http://localhost:3000/api/auth/callback/microsoft-entra-id`
+3. **클라이언트 ID / 테넌트 ID / 클라이언트 비밀** 발급 → `.env`에 입력
+4. `auth.ts`를 SSO 모드로 교체:
+   ```powershell
+   copy apps\closet-room\frontend\src\lib\auth-modes\auth-sso.ts apps\closet-room\frontend\src\lib\auth.ts
+   ```
+5. 재시작 → `/login`에서 Azure 버튼 동작
+
+---
+
+## 다음 단계 (V1.5 / V2)
+
+- [ ] Azure Portal 앱 등록 → SSO 실동작
+- [ ] `/admin/*` 어드민 페이지에 SSO 보호 적용 (middleware.ts)
+- [ ] Chrome Extension 자동 동기화 (manifest key 고정 + externally_connectable)
+- [ ] 동물별 디테일 (꼬리, 4방향 facing/walk 애니메이션)
+- [ ] **V2** — 옷장 등록 + 자동 태깅 + 코디 조언 + Google 로그인 + Postgres 전환
+
+자세한 진행 상황은 [`TASKS.md`](./TASKS.md), 기획은 [`clothesPlan.md`](../clothesPlan.md) 참고.
+
+---
+
+## 라이선스 / 출처
+
+- 기반: **fnf-mono-starter** (F&F 내부 모노레포 템플릿)
+- 픽셀 텍스처: 자체 코드 생성 (마인크래프트 텍스처 직접 사용 X)
+- 사용 라이브러리: Next.js, NestJS, Phaser.js, Prisma, NextAuth, Socket.io, Anthropic SDK
