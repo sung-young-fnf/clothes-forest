@@ -7,13 +7,16 @@ WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
 
-# Monorepo workspace
+# Monorepo workspace (lockfile 검증 위해 모든 workspace package.json 필요)
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json ./
+COPY apps/closet-room/backend/package.json ./apps/closet-room/backend/
 COPY apps/closet-room/frontend/package.json ./apps/closet-room/frontend/
+COPY apps/closet-room/extension/package.json ./apps/closet-room/extension/
 
-# pnpm store cache
+# --ignore-scripts: backend의 prisma postinstall이 frontend 빌드 컨텍스트에서 실패하는 것 방지
+# --no-frozen-lockfile: lockfile drift 허용 (V1 dev 단계, 운영 배포 시 다시 frozen으로)
 RUN --mount=type=cache,id=pnpm-fe,target=/root/.local/share/pnpm/store \
-    pnpm install --frozen-lockfile
+    pnpm install --no-frozen-lockfile --ignore-scripts
 
 # ─── Builder ───
 FROM node:20-alpine AS builder
@@ -27,7 +30,6 @@ RUN corepack enable && corepack prepare pnpm@9.14.2 --activate
 
 COPY --from=deps /app ./
 COPY apps/closet-room/frontend/ ./apps/closet-room/frontend/
-COPY packages/ ./packages/
 
 WORKDIR /app/apps/closet-room/frontend
 
