@@ -12,19 +12,11 @@ import type { Server, Socket } from 'socket.io';
 import { AuthService, type AnonymousJwtPayload } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ClaudeService, type RecentMessage } from '../claude/claude.service';
-
-interface PresenceEntry {
-  deviceId: string;
-  nickname: string;
-  characterId: string;
-  col: number;
-  row: number;
-  lastActiveAt: number;
-}
+import { RedisStore, type PresenceEntry } from './redis-stores';
 
 const ROOM_ID = 'main';
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5분 무활동 → 자동 퇴장
-const IDLE_CHECK_INTERVAL_MS = 60 * 1000; // 1분마다 점검
+const IDLE_TIMEOUT_MS = 5 * 60 * 1000;
+const IDLE_CHECK_INTERVAL_MS = 60 * 1000;
 
 @WebSocketGateway({
   cors: {
@@ -36,8 +28,7 @@ export class RoomGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(RoomGateway.name);
-  private readonly presence = new Map<string, PresenceEntry>(); // key: deviceId
-  private readonly chatRate = new Map<string, { lastAt: number; windowStart: number; windowCount: number }>();
+  private readonly instanceId = process.env.INSTANCE_ID ?? `inst-${process.pid}`;
   private idleTimer?: NodeJS.Timeout;
 
   @WebSocketServer()
@@ -47,12 +38,15 @@ export class RoomGateway
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
     private readonly claude: ClaudeService,
+    private readonly store: RedisStore,
   ) {}
+
+  // ─── 연결 lifecycle ─────────────────────────────────
 
   async handleConnection(client: Socket) {
     const token = this.extractToken(client);
     if (!token) {
-      this.logger.warn(`reject (no token): ${client.id}`);
+      this.logger.warn(`[${this.instanceId}] reject (no token)`);
       client.disconnect(true);
       return;
     }
@@ -60,12 +54,12 @@ export class RoomGateway
     try {
       payload = this.auth.verifyToken(token);
     } catch {
-      this.logger.warn(`reject (bad token): ${client.id}`);
+      this.logger.warn(`[${this.instanceId}] reject (bad token)`);
       client.disconnect(true);
       return;
     }
 
-    // 중복 접속 정리: 같은 deviceId 기존 소켓 끊기
+    // 같은 인스턴스 내 중복 deviceId 소켓 정리 (다른 인스턴스는 Redis adapter가 broadcast 동기화로 자연 정리)
     for (const [sid, s] of this.server.sockets.sockets) {
       if (sid !== client.id && s.data?.user?.sub === payload.sub) {
         s.disconnect(true);
@@ -74,25 +68,27 @@ export class RoomGateway
 
     client.data.user = payload;
     client.join(ROOM_ID);
-    this.logger.log(`connect ${client.id} (${payload.nickname})`);
+    this.logger.log(`[${this.instanceId}] connect ${client.id} (${payload.nickname})`);
   }
 
-  handleDisconnect(client: Socket) {
+  async handleDisconnect(client: Socket) {
     const user = client.data.user as AnonymousJwtPayload | undefined;
     if (!user) return;
-    const entry = this.presence.get(user.sub);
-    this.presence.delete(user.sub);
+    const entry = await this.store.getPresence(user.sub);
     if (entry) {
-      client.to(ROOM_ID).emit('user:left', { deviceId: user.sub });
-      this.logger.log(`disconnect ${client.id} (${user.nickname})`);
+      await this.store.deletePresence(user.sub);
+      this.server.to(ROOM_ID).emit('user:left', { deviceId: user.sub });
+      this.logger.log(`[${this.instanceId}] disconnect ${client.id} (${user.nickname})`);
     }
   }
 
+  // ─── 이벤트 핸들러 ─────────────────────────────────
+
   @SubscribeMessage('join')
-  handleJoin(
+  async handleJoin(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { col: number; row: number },
-  ): { peers: PresenceEntry[] } {
+  ): Promise<{ peers: PresenceEntry[] }> {
     const user = client.data.user as AnonymousJwtPayload;
     const entry: PresenceEntry = {
       deviceId: user.sub,
@@ -102,28 +98,26 @@ export class RoomGateway
       row: Number.isFinite(data?.row) ? data.row : 10,
       lastActiveAt: Date.now(),
     };
-    this.presence.set(user.sub, entry);
+    await this.store.setPresence(entry);
     client.to(ROOM_ID).emit('user:joined', entry);
-    const peers = [...this.presence.values()].filter((p) => p.deviceId !== user.sub);
+    const all = await this.store.allPresence();
+    const peers = all.filter((p) => p.deviceId !== user.sub);
     return { peers };
   }
 
   @SubscribeMessage('move')
-  handleMove(
+  async handleMove(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { col: number; row: number },
-  ): void {
+  ): Promise<void> {
     const user = client.data.user as AnonymousJwtPayload;
-    const entry = this.presence.get(user.sub);
-    if (!entry) return;
     if (!Number.isFinite(data?.col) || !Number.isFinite(data?.row)) return;
-    entry.col = data.col;
-    entry.row = data.row;
-    entry.lastActiveAt = Date.now();
+    const updated = await this.store.touchPresence(user.sub, { col: data.col, row: data.row });
+    if (!updated) return;
     client.to(ROOM_ID).emit('user:moved', {
       deviceId: user.sub,
-      col: entry.col,
-      row: entry.row,
+      col: updated.col,
+      row: updated.row,
     });
   }
 
@@ -137,12 +131,11 @@ export class RoomGateway
     if (content.length === 0 || content.length > 500) {
       return { ok: false, reason: 'invalid_length' };
     }
-    if (!this.allowChat(user.sub)) {
+    if (!(await this.store.allowChat(user.sub))) {
       return { ok: false, reason: 'rate_limited' };
     }
 
-    const presenceEntry = this.presence.get(user.sub);
-    if (presenceEntry) presenceEntry.lastActiveAt = Date.now();
+    await this.store.touchPresence(user.sub, {});
 
     const saved = await this.prisma.writer.chatMessage.create({
       data: {
@@ -155,7 +148,7 @@ export class RoomGateway
       },
     });
 
-    const event = {
+    this.server.to(ROOM_ID).emit('chat:new', {
       id: saved.id,
       deviceId: user.sub,
       nickname: user.nickname,
@@ -164,10 +157,8 @@ export class RoomGateway
       content: saved.content,
       kind: saved.kind,
       createdAt: saved.createdAt.toISOString(),
-    };
-    this.server.to(ROOM_ID).emit('chat:new', event);
+    });
 
-    // @claude 멘션이 있으면 비동기로 Claude 응답 생성
     const question = this.extractClaudeQuestion(content);
     if (question !== null) {
       void this.replyAsClaude(user.nickname, question);
@@ -175,7 +166,8 @@ export class RoomGateway
     return { ok: true };
   }
 
-  /** content에서 @claude 부분을 떼고 본문만 반환. 멘션 없으면 null. */
+  // ─── Claude / system 메시지 ─────────────────────────
+
   private extractClaudeQuestion(content: string): string | null {
     const m = content.match(/@claude\b/i);
     if (!m) return null;
@@ -252,26 +244,7 @@ export class RoomGateway
     });
   }
 
-  /** Rate limit: 초당 1 + 분당 30. */
-  private allowChat(deviceId: string): boolean {
-    const now = Date.now();
-    const rec = this.chatRate.get(deviceId);
-    if (!rec) {
-      this.chatRate.set(deviceId, { lastAt: now, windowStart: now, windowCount: 1 });
-      return true;
-    }
-    if (now - rec.lastAt < 1000) return false;
-    if (now - rec.windowStart >= 60_000) {
-      rec.windowStart = now;
-      rec.windowCount = 0;
-    }
-    if (rec.windowCount >= 30) return false;
-    rec.lastAt = now;
-    rec.windowCount += 1;
-    return true;
-  }
-
-  // ─── Browse Session broadcast (BrowseController에서 호출) ────
+  // ─── Browse Session broadcast ─────────────────────────
 
   notifyBrowseStarted(data: { browseSessionId: string; hostDeviceId: string; hostNickname: string }) {
     void this.emitSystem(`${data.hostNickname}님이 쇼핑을 시작했어요`);
@@ -289,10 +262,7 @@ export class RoomGateway
       priceText: string | null;
     };
   }): Promise<void> {
-    // 1) 라이브 이벤트 (Extension의 push로 인한 page change)
     this.server.to(ROOM_ID).emit('browse:page', data);
-
-    // 2) 채팅 패널에도 page_card 메시지로 영구 보존
     const content = data.page.title ?? data.page.url;
     const saved = await this.prisma.writer.chatMessage.create({
       data: {
@@ -329,29 +299,27 @@ export class RoomGateway
     this.server.to(ROOM_ID).emit('browse:end', data);
   }
 
-  // ─── 자리비움 자동 퇴장 ─────────────────────────────
+  // ─── 자리비움 자동 퇴장 (각 인스턴스가 자기 소켓만 검사) ────
 
   onModuleInit() {
-    this.idleTimer = setInterval(() => this.checkIdle(), IDLE_CHECK_INTERVAL_MS);
+    this.idleTimer = setInterval(() => void this.checkIdle(), IDLE_CHECK_INTERVAL_MS);
   }
 
   onModuleDestroy() {
     if (this.idleTimer) clearInterval(this.idleTimer);
   }
 
-  private checkIdle() {
+  private async checkIdle(): Promise<void> {
     const now = Date.now();
-    const expired: string[] = [];
-    for (const [deviceId, entry] of this.presence) {
-      if (now - entry.lastActiveAt > IDLE_TIMEOUT_MS) expired.push(deviceId);
-    }
-    if (expired.length === 0) return;
-    for (const deviceId of expired) {
-      for (const [, socket] of this.server.sockets.sockets) {
-        if (socket.data?.user?.sub === deviceId) {
-          this.logger.log(`idle kick ${socket.id} (${socket.data.user.nickname})`);
-          socket.disconnect(true);
-        }
+    // 이 인스턴스에 붙어있는 소켓만 순회
+    for (const [, socket] of this.server.sockets.sockets) {
+      const user = socket.data?.user as AnonymousJwtPayload | undefined;
+      if (!user) continue;
+      const entry = await this.store.getPresence(user.sub);
+      if (!entry) continue;
+      if (now - entry.lastActiveAt > IDLE_TIMEOUT_MS) {
+        this.logger.log(`[${this.instanceId}] idle kick ${socket.id} (${user.nickname})`);
+        socket.disconnect(true);
       }
     }
   }

@@ -43,5 +43,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=10s --timeout=5s --start-period=20s --retries=5 \
     CMD node -e "require('http').get('http://localhost:8000/api/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
-# 컨테이너 시작 시 SQLite 마이그레이션 적용 → 앱 부팅
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main.js"]
+# 스키마 동기화는 compose의 db-push 서비스가 전담. 여기선 앱만 부팅.
+CMD ["node", "dist/main.js"]
