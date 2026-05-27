@@ -1,5 +1,5 @@
 import NextAuth from 'next-auth';
-import AzureAD from 'next-auth/providers/azure-ad';
+import MicrosoftEntraID from 'next-auth/providers/microsoft-entra-id';
 import type { JWT } from 'next-auth/jwt';
 
 // TypeScript 타입 확장
@@ -61,7 +61,7 @@ async function refreshAccessToken(token: JWT): Promise<JWT> {
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   providers: [
-    AzureAD({
+    MicrosoftEntraID({
       clientId: process.env.AZURE_AD_CLIENT_ID!,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET!,
       // NextAuth v5: tenantId 옵션은 제거됨 — issuer URL에 tenant를 직접 인코딩

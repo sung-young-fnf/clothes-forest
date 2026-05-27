@@ -126,6 +126,12 @@ services:
       NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
       AUTH_SECRET: "${AUTH_SECRET:-dev-secret-change-me}"
       NEXTAUTH_URL: "http://localhost:3000"
+      # NextAuth v5가 docker 환경(프록시 뒤)에서 host 신뢰
+      AUTH_TRUST_HOST: "true"
+      # Azure AD SSO — .env에서 주입 (값은 사용자가 .env에 입력)
+      AZURE_AD_CLIENT_ID: "${AZURE_AD_CLIENT_ID:-}"
+      AZURE_AD_CLIENT_SECRET: "${AZURE_AD_CLIENT_SECRET:-}"
+      AZURE_AD_TENANT_ID: "${AZURE_AD_TENANT_ID:-}"
     healthcheck:
       test:
         - CMD-SHELL
