@@ -1,0 +1,108 @@
+# Closet Room — Docker Swarm Stack (오토스케일링 실습)
+#
+# compose와 차이:
+#   - backend가 단일 서비스 + deploy.replicas (swarm 내장 VIP가 자동 LB)
+#   - build 불가 → 미리 빌드한 image 참조 (infra/swarm/deploy.sh가 빌드)
+#   - autoscaler 스크립트가 docker service scale로 replica 자동 증감
+#
+# 배포: infra/swarm/deploy.sh
+# 스케일 자동화: infra/swarm/autoscaler.sh
+
+x-backend-env: &backend-env
+  DATABASE_URL: "postgresql://closet:closet@postgres:5432/closet_room?schema=public"
+  JWT_SECRET: "${JWT_SECRET:-dev-secret-change-me-in-production}"
+  CORS_ORIGINS: "http://localhost:3000"
+  REDIS_URL: "redis://valkey:6379"
+  AWS_REGION: "${AWS_REGION:-us-west-2}"
+  AWS_BEARER_TOKEN_BEDROCK: "${AWS_BEARER_TOKEN_BEDROCK:-}"
+  SONNET_MODEL_ID: "${SONNET_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}"
+
+services:
+  valkey:
+    image: valkey/valkey:7-alpine
+    volumes:
+      - valkey_data:/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: closet
+      POSTGRES_PASSWORD: closet
+      POSTGRES_DB: closet_room
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # 스키마 동기화 1회 (swarm job — 완료 후 종료)
+  db-push:
+    image: closet-room-backend:latest
+    command: ["sh", "-c", "npx prisma db push --skip-generate --accept-data-loss"]
+    environment:
+      <<: *backend-env
+    deploy:
+      mode: replicated-job
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+
+  backend:
+    image: closet-room-backend:latest
+    environment:
+      <<: *backend-env
+    # 이미지의 Dockerfile HEALTHCHECK를 swarm이 오판해 kill하는 문제 회피.
+    # 컨테이너가 죽으면 swarm이 어차피 재시작하므로 프로세스 레벨 HA는 유지됨.
+    healthcheck:
+      test: ["NONE"]
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: any
+      resources:
+        limits:
+          cpus: "0.50"     # autoscaler가 이 limit 대비 사용률로 판단
+          memory: 512M
+      update_config:
+        parallelism: 1
+        order: start-first
+
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "8000:8080"
+    volumes:
+      - ./infra/swarm/nginx.swarm.conf:/etc/nginx/conf.d/default.conf:ro
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  frontend:
+    image: closet-room-frontend:latest
+    ports:
+      - "3000:3000"
+    environment:
+      BACKEND_URL: "http://nginx:8080"
+      NEXT_PUBLIC_BACKEND_URL: "http://localhost:8000"
+      AUTH_SECRET: "${AUTH_SECRET:-dev-secret-change-me}"
+      NEXTAUTH_URL: "http://localhost:3000"
+      AUTH_TRUST_HOST: "true"
+      AZURE_AD_CLIENT_ID: "${AZURE_AD_CLIENT_ID:-}"
+      AZURE_AD_CLIENT_SECRET: "${AZURE_AD_CLIENT_SECRET:-}"
+      AZURE_AD_TENANT_ID: "${AZURE_AD_TENANT_ID:-}"
+    healthcheck:
+      test: ["NONE"]
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+volumes:
+  valkey_data:
+  postgres_data:

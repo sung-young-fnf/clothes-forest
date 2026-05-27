@@ -28,7 +28,8 @@ export class RoomGateway
   implements OnGatewayConnection, OnGatewayDisconnect, OnModuleInit, OnModuleDestroy
 {
   private readonly logger = new Logger(RoomGateway.name);
-  private readonly instanceId = process.env.INSTANCE_ID ?? `inst-${process.pid}`;
+  private readonly instanceId =
+    process.env.INSTANCE_ID ?? process.env.HOSTNAME ?? `inst-${process.pid}`;
   private idleTimer?: NodeJS.Timeout;
 
   @WebSocketServer()
