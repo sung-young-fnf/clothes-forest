@@ -38,12 +38,12 @@ interface ChatPanelProps {
 }
 
 const CHARACTERS = [
-  { id: 'dog', emoji: '🐶' },
+  { id: 'dog', emoji: '🐺' },
   { id: 'cat', emoji: '🐱' },
-  { id: 'rabbit', emoji: '🐰' },
-  { id: 'fox', emoji: '🦊' },
-  { id: 'bear', emoji: '🐻' },
-  { id: 'hamster', emoji: '🐹' },
+  { id: 'chicken', emoji: '🐤' },
+  { id: 'sheep', emoji: '🐑' },
+  { id: 'cow', emoji: '🐮' },
+  { id: 'pig', emoji: '🐷' },
 ];
 
 const EMOJI: Record<string, string> = Object.fromEntries(CHARACTERS.map((c) => [c.id, c.emoji]));

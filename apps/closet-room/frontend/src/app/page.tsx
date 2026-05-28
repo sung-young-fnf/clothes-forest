@@ -3,13 +3,14 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
+// 사진 레퍼런스(hq720.jpg, gm684674) 기준 6마리 마인크래프트 베이비 큐브 동물
 const CHARACTERS = [
-  { id: 'dog', label: '강아지', emoji: '🐶' },
+  { id: 'dog', label: '늑대', emoji: '🐺' },
   { id: 'cat', label: '고양이', emoji: '🐱' },
-  { id: 'rabbit', label: '토끼', emoji: '🐰' },
-  { id: 'fox', label: '여우', emoji: '🦊' },
-  { id: 'bear', label: '곰', emoji: '🐻' },
-  { id: 'hamster', label: '햄스터', emoji: '🐹' },
+  { id: 'chicken', label: '닭', emoji: '🐤' },
+  { id: 'sheep', label: '양', emoji: '🐑' },
+  { id: 'cow', label: '소', emoji: '🐮' },
+  { id: 'pig', label: '돼지', emoji: '🐷' },
 ] as const;
 
 type CharacterId = (typeof CHARACTERS)[number]['id'];

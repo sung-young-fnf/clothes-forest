@@ -57,13 +57,28 @@ log_debug "STDIN saved to: $STDIN_TEMP (size: $(wc -c < "$STDIN_TEMP"))"
 if [[ -z "$SERVICE_CONTEXT" ]]; then
   log_debug "SERVICE_CONTEXT.md not found - new project detected"
 
+  # 스킵 마커가 있으면 범용 모드 - 차단하지 않고 통과
+  if [[ -f "$REPO_ROOT/.claude/.project-init-skipped" ]]; then
+    log_debug "Project init skipped marker found - allowing (general mode)"
+    rm -f "$STDIN_TEMP"
+    exit 0
+  fi
+
   # 사용자가 "프로젝트 초기화" 또는 "스킵"을 입력했는지 확인
   USER_INPUT=$(cat "$STDIN_TEMP" 2>/dev/null || echo "")
 
-  if echo "$USER_INPUT" | grep -qiE '프로젝트\s*초기화|project\s*init|initialize|초기화\s*스킵|skip\s*init'; then
-    log_debug "User requested initialization or skip - allowing"
+  # 스킵 요청이면 마커를 영구 생성하여 향후 모든 프롬프트 통과
+  if echo "$USER_INPUT" | grep -qiE '초기화\s*스킵|skip\s*init|범용|general'; then
+    log_debug "User requested skip - creating persistent marker"
+    echo "# Skipped at $(date)" > "$REPO_ROOT/.claude/.project-init-skipped"
     rm -f "$STDIN_TEMP"
-    exit 0  # 초기화/스킵 요청은 통과
+    exit 0
+  fi
+
+  if echo "$USER_INPUT" | grep -qiE '프로젝트\s*초기화|project\s*init|initialize'; then
+    log_debug "User requested initialization - allowing"
+    rm -f "$STDIN_TEMP"
+    exit 0  # 초기화 요청은 통과
   fi
 
   # 그 외 모든 요청은 JSON으로 차단 (exit 0 + decision: block)

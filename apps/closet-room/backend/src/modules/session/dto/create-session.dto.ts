@@ -1,7 +1,8 @@
 import { IsIn, IsString, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
-export const CHARACTER_IDS = ['dog', 'cat', 'rabbit', 'fox', 'bear', 'hamster'] as const;
+// 사진 레퍼런스 기준 6마리. dog 키는 늑대 텍스처에 매핑됨.
+export const CHARACTER_IDS = ['dog', 'cat', 'chicken', 'sheep', 'cow', 'pig'] as const;
 export type CharacterId = (typeof CHARACTER_IDS)[number];
 
 export class CreateSessionDto {
@@ -10,7 +11,7 @@ export class CreateSessionDto {
   @Length(2, 12)
   nickname!: string;
 
-  @ApiProperty({ enum: CHARACTER_IDS, example: 'fox' })
+  @ApiProperty({ enum: CHARACTER_IDS, example: 'cow' })
   @IsIn(CHARACTER_IDS as unknown as string[])
   characterId!: CharacterId;
 }

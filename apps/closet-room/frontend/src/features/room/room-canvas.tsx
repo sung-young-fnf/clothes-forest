@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Socket } from 'socket.io-client';
 import {
   CANVAS_H,
@@ -26,6 +26,8 @@ export default function RoomCanvas({ socket, nickname, characterId, onReady }: R
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<import('phaser').Game | null>(null);
   const sceneRef = useRef<RoomScene | null>(null);
+  // scene이 비동기로 준비되므로 socket effect가 재실행되도록 state로 노출
+  const [sceneReady, setSceneReady] = useState(false);
 
   // 1. Phaser game 부팅 (nickname/characterId 변경 시 재생성)
   useEffect(() => {
@@ -53,6 +55,7 @@ export default function RoomCanvas({ socket, nickname, characterId, onReady }: R
           return;
         }
         sceneRef.current = scene;
+        setSceneReady(true);
         onReady?.({ showBubble: scene.showBubble.bind(scene) });
       });
     })();
@@ -60,49 +63,43 @@ export default function RoomCanvas({ socket, nickname, characterId, onReady }: R
     return () => {
       cancelled = true;
       sceneRef.current = null;
+      setSceneReady(false);
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
   }, [nickname, characterId, onReady]);
 
-  // 2. socket과 scene 이벤트 연결 (socket이 mount된 후에)
+  // 2. socket과 scene 이벤트 연결 — socket·scene 둘 다 준비된 뒤 실행
+  //    (scene은 비동기 부팅이라 sceneReady state를 deps에 넣어 순서 무관하게 보장)
   useEffect(() => {
-    if (!socket) return;
+    if (!socket || !sceneReady) return;
     const scene = sceneRef.current;
     if (!scene) return;
 
-    const onSceneReady = (pos: { col: number; row: number }) => {
-      socket.emit('join', pos, (ack?: { peers: PeerEntry[] }) => {
-        for (const peer of ack?.peers ?? []) scene.addPeer(peer);
-      });
-    };
     const onMoved = (pos: { col: number; row: number }) => socket.emit('move', pos);
     const onJoined = (peer: PeerEntry) => scene.addPeer(peer);
     const onPeerMoved = (data: { deviceId: string; col: number; row: number }) =>
       scene.movePeer(data.deviceId, data.col, data.row);
     const onLeft = (data: { deviceId: string }) => scene.removePeer(data.deviceId);
 
-    scene.events.on(ROOM_EVENTS.ready, onSceneReady);
     scene.events.on(ROOM_EVENTS.moved, onMoved);
     socket.on('user:joined', onJoined);
     socket.on('user:moved', onPeerMoved);
     socket.on('user:left', onLeft);
 
-    // scene이 이미 ready된 경우(useEffect 순서) — 즉시 join
-    // ROOM_EVENTS.ready는 scene.create()에서 1회 emit이므로 늦게 붙으면 놓침
-    // sceneRef가 set된 직후 join을 한 번 시도
-    socket.emit('join', { col: 12, row: 10 }, (ack?: { peers: PeerEntry[] }) => {
+    // 입장 — 서버는 ack로 기존 접속자(peers) 목록을 돌려주고,
+    // 다른 사람들에겐 user:joined 를 broadcast 한다.
+    socket.emit('join', scene.getPosition(), (ack?: { peers: PeerEntry[] }) => {
       for (const peer of ack?.peers ?? []) scene.addPeer(peer);
     });
 
     return () => {
-      scene.events.off(ROOM_EVENTS.ready, onSceneReady);
       scene.events.off(ROOM_EVENTS.moved, onMoved);
       socket.off('user:joined', onJoined);
       socket.off('user:moved', onPeerMoved);
       socket.off('user:left', onLeft);
     };
-  }, [socket]);
+  }, [socket, sceneReady]);
 
   return (
     <div

@@ -11,6 +11,7 @@ import { RoomModule } from './modules/room/room.module';
 import { ChatModule } from './modules/chat/chat.module';
 import { ClaudeModule } from './modules/claude/claude.module';
 import { BrowseModule } from './modules/browse/browse.module';
+import { StorageModule } from './modules/storage/storage.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { BrowseModule } from './modules/browse/browse.module';
     RoomModule,
     ChatModule,
     BrowseModule,
+    StorageModule,
   ],
 })
 export class AppModule {}

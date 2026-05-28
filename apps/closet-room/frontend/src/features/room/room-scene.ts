@@ -32,7 +32,6 @@ interface PeerGraphics {
 
 /** Scene이 발생시키는 이벤트 — 외부(React)가 socket으로 forward */
 export const ROOM_EVENTS = {
-  ready: 'room:ready',
   moved: 'room:moved',
 } as const;
 
@@ -47,6 +46,8 @@ const FURNITURE: Furniture[] = [
 ];
 
 const MOVE_COOLDOWN_MS = 140;
+const CHARACTER_SCALE = 3;
+const LABEL_GAP = 6;
 
 function buildBlockedCells(): Set<string> {
   const set = new Set<string>();
@@ -75,10 +76,32 @@ export class RoomScene extends Phaser.Scene {
   private myLabel?: Phaser.GameObjects.Text;
   private myCol = Math.floor(GRID_W / 2);
   private myRow = Math.floor(GRID_H / 2) + 2;
-  private cursors?: Phaser.Types.Input.Keyboard.CursorKeys;
-  private wasd?: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   private nextMoveAt = 0;
   private peers = new Map<string, PeerGraphics>(); // key: deviceId
+  private pressedKeys = new Set<string>();
+  private readonly movementKeys = new Set([
+    'KeyW',
+    'KeyA',
+    'KeyS',
+    'KeyD',
+    'ArrowUp',
+    'ArrowLeft',
+    'ArrowDown',
+    'ArrowRight',
+  ]);
+  private readonly handleKeyDown = (event: KeyboardEvent) => {
+    if (!this.movementKeys.has(event.code) || this.isTypingTarget(event.target)) return;
+    this.pressedKeys.add(event.code);
+    event.preventDefault();
+  };
+  private readonly handleKeyUp = (event: KeyboardEvent) => {
+    if (!this.movementKeys.has(event.code)) return;
+    this.pressedKeys.delete(event.code);
+    if (!this.isTypingTarget(event.target)) event.preventDefault();
+  };
+  private readonly clearPressedKeys = () => {
+    this.pressedKeys.clear();
+  };
 
   constructor() {
     super({ key: 'RoomScene' });
@@ -97,28 +120,51 @@ export class RoomScene extends Phaser.Scene {
     this.drawMyCharacter();
 
     if (this.input.keyboard) {
-      this.cursors = this.input.keyboard.createCursorKeys();
-      this.wasd = this.input.keyboard.addKeys('W,A,S,D') as Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
       // 입력칸이 포커스일 땐 게임이 키 이벤트를 가로채지 않도록
       this.input.keyboard.disableGlobalCapture();
     }
 
-    // 외부(React)에게 초기 위치 전달 — socket join 발사용
-    this.events.emit(ROOM_EVENTS.ready, { col: this.myCol, row: this.myRow });
+    window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('blur', this.clearPressedKeys);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.removeKeyboardListeners, this);
   }
 
   update(time: number) {
+    // 매 프레임 이름표를 캐릭터(tween 이동 중)에 맞춰 따라가게 함
+    this.syncLabels();
+
     if (time < this.nextMoveAt) return;
     const dir = this.readDirection();
     if (!dir) return;
-    const nextCol = this.myCol + dir.dx;
-    const nextRow = this.myRow + dir.dy;
-    if (!isWalkable(nextCol, nextRow)) return;
-    this.myCol = nextCol;
-    this.myRow = nextRow;
-    this.positionMyCharacter();
+
+    // 대각 이동을 먼저 시도하고, 벽/가구에 막히면 한 축씩 슬라이드
+    const diagonal = dir.dx !== 0 && dir.dy !== 0;
+    const moved =
+      this.tryStep(dir.dx, dir.dy) ||
+      (diagonal && this.tryStep(dir.dx, 0)) ||
+      (diagonal && this.tryStep(0, dir.dy));
+    if (!moved) return;
+
     this.nextMoveAt = time + MOVE_COOLDOWN_MS;
     this.events.emit(ROOM_EVENTS.moved, { col: this.myCol, row: this.myRow });
+  }
+
+  /** 한 칸 이동 시도 — 목표 셀이 walkable이면 이동·tween 후 true */
+  private tryStep(dx: number, dy: number): boolean {
+    if (dx === 0 && dy === 0) return false;
+    const nextCol = this.myCol + dx;
+    const nextRow = this.myRow + dy;
+    if (!isWalkable(nextCol, nextRow)) return false;
+    this.myCol = nextCol;
+    this.myRow = nextRow;
+    this.tweenCharTo(this.myChar, this.myCol, this.myRow);
+    return true;
+  }
+
+  /** 현재 내 캐릭터 셀 위치 (socket join 시 사용) */
+  getPosition(): { col: number; row: number } {
+    return { col: this.myCol, row: this.myRow };
   }
 
   // ─── Peer 관리 (외부에서 호출) ─────────────────────────
@@ -128,14 +174,13 @@ export class RoomScene extends Phaser.Scene {
       this.movePeer(peer.deviceId, peer.col, peer.row);
       return;
     }
-    const cx = peer.col * TILE + TILE / 2;
-    const baseY = (peer.row + 1) * TILE - 2;
+    const { x: cx, y: baseY } = this.cellToXY(peer.col, peer.row);
     const char = this.add
       .sprite(cx, baseY, characterTexture(peer.characterId))
       .setOrigin(0.5, 1)
-      .setScale(2);
+      .setScale(CHARACTER_SCALE);
     const label = this.add
-      .text(cx, baseY - 44, peer.nickname, {
+      .text(cx, this.labelY(char), peer.nickname, {
         fontFamily: 'monospace',
         fontSize: '11px',
         color: '#ffffff',
@@ -149,15 +194,14 @@ export class RoomScene extends Phaser.Scene {
   movePeer(deviceId: string, col: number, row: number) {
     const g = this.peers.get(deviceId);
     if (!g) return;
-    const cx = col * TILE + TILE / 2;
-    const baseY = (row + 1) * TILE - 2;
-    g.char.setPosition(cx, baseY);
-    g.label.setPosition(cx, baseY - 44);
+    // 다른 사람 캐릭터도 셀 사이를 부드럽게 보간 이동 (label은 update에서 따라감)
+    this.tweenCharTo(g.char, col, row);
   }
 
   removePeer(deviceId: string) {
     const g = this.peers.get(deviceId);
     if (!g) return;
+    this.tweens.killTweensOf(g.char);
     g.char.destroy();
     g.label.destroy();
     this.peers.delete(deviceId);
@@ -193,32 +237,64 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private readDirection(): { dx: number; dy: number } | null {
-    // 채팅 input 등에 포커스가 있으면 이동 키 무시
-    const active = typeof document !== 'undefined' ? document.activeElement : null;
-    if (active) {
-      const tag = active.tagName;
-      const editable = (active as HTMLElement).isContentEditable;
-      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || editable) {
-        return null;
-      }
+    if (this.isTypingTarget(document.activeElement)) {
+      this.pressedKeys.clear();
+      return null;
     }
-    const left = this.cursors?.left.isDown || this.wasd?.A.isDown;
-    const right = this.cursors?.right.isDown || this.wasd?.D.isDown;
-    const up = this.cursors?.up.isDown || this.wasd?.W.isDown;
-    const down = this.cursors?.down.isDown || this.wasd?.S.isDown;
-    if (left) return { dx: -1, dy: 0 };
-    if (right) return { dx: 1, dy: 0 };
-    if (up) return { dx: 0, dy: -1 };
-    if (down) return { dx: 0, dy: 1 };
-    return null;
+    const left = this.pressedKeys.has('ArrowLeft') || this.pressedKeys.has('KeyA');
+    const right = this.pressedKeys.has('ArrowRight') || this.pressedKeys.has('KeyD');
+    const up = this.pressedKeys.has('ArrowUp') || this.pressedKeys.has('KeyW');
+    const down = this.pressedKeys.has('ArrowDown') || this.pressedKeys.has('KeyS');
+
+    // 두 축을 합쳐 대각 이동 허용 (예: 위+오른쪽 = {dx:1, dy:-1})
+    let dx = 0;
+    let dy = 0;
+    if (left) dx -= 1;
+    if (right) dx += 1;
+    if (up) dy -= 1;
+    if (down) dy += 1;
+    if (dx === 0 && dy === 0) return null;
+    return { dx, dy };
   }
 
-  private positionMyCharacter() {
-    if (!this.myChar || !this.myLabel) return;
-    const cx = this.myCol * TILE + TILE / 2;
-    const baseY = (this.myRow + 1) * TILE - 2;
-    this.myChar.setPosition(cx, baseY);
-    this.myLabel.setPosition(cx, baseY - 44);
+  private isTypingTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof HTMLElement)) return false;
+    const tag = target.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+  }
+
+  private removeKeyboardListeners() {
+    window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('blur', this.clearPressedKeys);
+    this.pressedKeys.clear();
+  }
+
+  /** 셀 좌표(col,row) → 픽셀 좌표. 캐릭터 origin은 (0.5, 1) = 발밑 기준 */
+  private cellToXY(col: number, row: number): { x: number; y: number } {
+    return { x: col * TILE + TILE / 2, y: (row + 1) * TILE - 2 };
+  }
+
+  /** 캐릭터를 목표 셀로 부드럽게 보간 이동 (진행 중 tween은 중단 후 재시작) */
+  private tweenCharTo(char: Phaser.GameObjects.Sprite | undefined, col: number, row: number) {
+    if (!char) return;
+    const { x, y } = this.cellToXY(col, row);
+    this.tweens.killTweensOf(char);
+    this.tweens.add({ targets: char, x, y, duration: MOVE_COOLDOWN_MS, ease: 'Linear' });
+  }
+
+  /** 이름표를 캐릭터 머리 위로 따라붙임 (tween 이동 중에도 매 프레임 동기화) */
+  private syncLabels() {
+    if (this.myChar && this.myLabel) {
+      this.myLabel.setPosition(this.myChar.x, this.labelY(this.myChar));
+    }
+    for (const { char, label } of this.peers.values()) {
+      label.setPosition(char.x, this.labelY(char));
+    }
+  }
+
+  private labelY(char: Phaser.GameObjects.Sprite): number {
+    return char.y - char.displayHeight - LABEL_GAP;
   }
 
   private drawFloor() {
@@ -259,10 +335,10 @@ export class RoomScene extends Phaser.Scene {
     this.myChar = this.add
       .sprite(cx, baseY, characterTexture(this.myCharacterId))
       .setOrigin(0.5, 1)
-      .setScale(2);
+      .setScale(CHARACTER_SCALE);
 
     this.myLabel = this.add
-      .text(cx, baseY - 44, this.myNickname, {
+      .text(cx, this.labelY(this.myChar), this.myNickname, {
         fontFamily: 'monospace',
         fontSize: '11px',
         color: '#ffffff',

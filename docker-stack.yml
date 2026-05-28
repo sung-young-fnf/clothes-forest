@@ -16,6 +16,13 @@ x-backend-env: &backend-env
   AWS_REGION: "${AWS_REGION:-us-west-2}"
   AWS_BEARER_TOKEN_BEDROCK: "${AWS_BEARER_TOKEN_BEDROCK:-}"
   SONNET_MODEL_ID: "${SONNET_MODEL_ID:-us.anthropic.claude-sonnet-4-5-20250929-v1:0}"
+  # MinIO (S3 호환 객체 스토리지) — 서비스명으로 internal DNS 해석
+  MINIO_ENDPOINT: "minio"
+  MINIO_PORT: "9000"
+  MINIO_USE_SSL: "false"
+  MINIO_ACCESS_KEY: "${MINIO_ROOT_USER:-minioadmin}"
+  MINIO_SECRET_KEY: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+  MINIO_BUCKET: "${MINIO_BUCKET:-closet-room}"
 
 services:
   valkey:
@@ -35,6 +42,24 @@ services:
       POSTGRES_DB: closet_room
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  # MinIO — S3 호환 객체 스토리지 (Docker 실습용)
+  # API: localhost:9000, Web Console: localhost:9001 (콘솔에서 객체 확인 가능)
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: "${MINIO_ROOT_USER:-minioadmin}"
+      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:-minioadmin}"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
     deploy:
       replicas: 1
       restart_policy:
@@ -106,3 +131,4 @@ services:
 volumes:
   valkey_data:
   postgres_data:
+  minio_data:

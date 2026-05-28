@@ -11,7 +11,7 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { AuthService, type AnonymousJwtPayload } from '../../auth/auth.service';
 import { PrismaService } from '../../prisma/prisma.service';
-import { ClaudeService, type RecentMessage } from '../claude/claude.service';
+import { ClaudeService, type PageContext, type RecentMessage } from '../claude/claude.service';
 import { RedisStore, type PresenceEntry } from './redis-stores';
 
 const ROOM_ID = 'main';
@@ -181,8 +181,14 @@ export class RoomGateway
       return;
     }
     try {
-      const recent = await this.fetchRecentForContext();
-      const text = await this.claude.replyToMention(askerNickname, question, recent);
+      const [recent, pageContext] = await Promise.all([
+        this.fetchRecentForContext(),
+        this.fetchActivePageContext(),
+      ]);
+      if (pageContext) {
+        this.logger.log(`@claude with page context: ${pageContext.url}`);
+      }
+      const text = await this.claude.replyToMention(askerNickname, question, recent, pageContext);
       const saved = await this.prisma.writer.chatMessage.create({
         data: {
           roomId: ROOM_ID,
@@ -220,6 +226,28 @@ export class RoomGateway
       senderType: m.senderType as RecentMessage['senderType'],
       content: m.content,
     }));
+  }
+
+  /** 현재 진행 중인 browse_session의 가장 최근 page_event를 Claude vision 입력으로 변환 */
+  private async fetchActivePageContext(): Promise<PageContext | null> {
+    const session = await this.prisma.reader.browseSession.findFirst({
+      where: { endedAt: null },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (!session) return null;
+    const event = await this.prisma.reader.pageEvent.findFirst({
+      where: { browseSessionId: session.id },
+      orderBy: { capturedAt: 'desc' },
+    });
+    if (!event) return null;
+    return {
+      url: event.url,
+      title: event.title,
+      ogImageUrl: event.ogImageUrl,
+      ogDescription: event.ogDescription,
+      siteName: event.siteName,
+      priceText: event.priceText,
+    };
   }
 
   private async emitSystem(text: string): Promise<void> {

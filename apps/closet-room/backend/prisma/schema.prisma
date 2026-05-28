@@ -107,7 +107,7 @@ model AuditLog {
 model Session {
   deviceId    String   @id @map("device_id")
   nickname    String
-  characterId String   @map("character_id") // dog | cat | rabbit | fox | bear | hamster
+  characterId String   @map("character_id") // dog | cat | chicken | sheep | cow | pig
   joinedAt    DateTime @default(now()) @map("joined_at")
   lastSeenAt  DateTime @default(now()) @map("last_seen_at")
 
