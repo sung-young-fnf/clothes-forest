@@ -10,6 +10,8 @@
     "https://*.29cm.co.kr/*",
     "https://*.coupang.com/*",
     "https://*.zigzag.kr/*",
+    "https://*.mlb-korea.com/*",
+    "https://*.discovery-expedition.com/*",
     "http://localhost:3000/*",
     "http://localhost:8000/*"
   ],
@@ -27,7 +29,9 @@
         "https://*.musinsa.com/*",
         "https://*.29cm.co.kr/*",
         "https://*.coupang.com/*",
-        "https://*.zigzag.kr/*"
+        "https://*.zigzag.kr/*",
+        "https://*.mlb-korea.com/*",
+        "https://*.discovery-expedition.com/*"
       ],
       "js": ["content.js"],
       "run_at": "document_idle"
